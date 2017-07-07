@@ -40,7 +40,7 @@ void setup() {
  
 void loop() {
 
-  if(detecta_passagem(100, 25, 0))
+  if(detecta_passagem(100, 25, 1))
   {
     contador++;
     Serial.print("Detectou passagem! Contador =  ");
