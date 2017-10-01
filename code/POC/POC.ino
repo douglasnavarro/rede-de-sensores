@@ -9,35 +9,35 @@ const char* password = "codecode";
 char enderecoThingspeak[] = "api.thingspeak.com"; // endereço do Thingspeak
 String keyThingspeak = "TM5QCZ16XSFD9TW5"; // a chave de escrita do canal, necessario para autorização
 int contador = 0;
- 
+
 void setup() {
-  
+
   Serial.begin (9600);
   pinMode(TRIGGER, OUTPUT);
   pinMode(ECHO, INPUT);
   pinMode(BUILTIN_LED, OUTPUT);
   digitalWrite(BUILTIN_LED, HIGH); //Apaga o LED que é ativo baixo
-  
-  WiFi.begin(ssid, password);
-  Serial.println("");
-  Serial.println("");
-  Serial.print("Conectando a rede ");
-  Serial.println(ssid);
-  
-  WiFi.begin(ssid, password);
-  
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
- 
-  Serial.println("");
-  Serial.println("Conectado ao WiFi!");  
-  Serial.println("Endereço IP: ");
-  Serial.println(WiFi.localIP());
-  Serial.println("");
+
+ WiFi.begin(ssid, password);
+ Serial.println("");
+ Serial.println("");
+ Serial.print("Conectando a rede ");
+ Serial.println(ssid);
+
+ WiFi.begin(ssid, password);
+
+ while (WiFi.status() != WL_CONNECTED) {
+   delay(500);
+   Serial.print(".");
+ }
+
+ Serial.println("");
+ Serial.println("Conectado ao WiFi!");
+ Serial.println("Endereço IP: ");
+ Serial.println(WiFi.localIP());
+ Serial.println("");
 }
- 
+
 void loop() {
 
   if(detecta_passagem(100, 25, 1))
@@ -49,9 +49,9 @@ void loop() {
     if(contador%5 == 0){
       pisca_led(500, LED_BUILTIN);
       Serial.println("Registrando no Thingspeak!");
-      registra_contador(++contador);
+     registra_contador(++contador);
     }
-  }  
+  }
 }
 
 void pisca_led(int tempo, int pino){
@@ -62,10 +62,10 @@ void pisca_led(int tempo, int pino){
 }
 
 void registra_contador(int contador){
-  
+
   Serial.print("Conectando a ");
   Serial.println(enderecoThingspeak);
-  
+
   WiFiClient client;
   const int httpPort = 80;
   if (!client.connect(enderecoThingspeak, httpPort)) {
@@ -93,20 +93,20 @@ int detecta_passagem(int threshold, int media, int debug){
   {
     digitalWrite(TRIGGER, LOW);
     delayMicroseconds(2);
-    
+
     digitalWrite(TRIGGER, HIGH);
     delayMicroseconds(10);
-    
+
     digitalWrite(TRIGGER, LOW);
     duration = pulseIn(ECHO, HIGH);
     distance = (duration/2) / 29.1;
     if(debug) Serial.println(distance);
     distanceSum += distance;
-    delay(20);
+    delay(40);
   }
-  
+
   distanceSum = distanceSum/media;
-  if(debug) 
+  if(debug)
   {
     Serial.print("Distancia media: ");
     Serial.println(distanceSum);
@@ -114,4 +114,3 @@ int detecta_passagem(int threshold, int media, int debug){
   return(distanceSum < threshold);
 
 }
-
