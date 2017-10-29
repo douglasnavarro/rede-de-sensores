@@ -48,7 +48,6 @@ void loop() {
   delay(50);
 }
 
-
 unsigned int average_distance(NewPing sonar, int samples){
   unsigned int average_distance = 0;
   unsigned int distance = 0;
@@ -60,6 +59,7 @@ unsigned int average_distance(NewPing sonar, int samples){
   average_distance = distance / samples;
   return average_distance;
 }
+
 /**detect_passage
     Detects someone passing by the sensor.
 
@@ -69,9 +69,8 @@ unsigned int average_distance(NewPing sonar, int samples){
     @return          - 1 for entry detection
     @return          - 2 for exit detection
 */
-int detect_passage(NewPing sonar1, NewPing sonar2){
-
-
+int detect_passage(NewPing sonar1, NewPing sonar2)
+{
 
 }
 
