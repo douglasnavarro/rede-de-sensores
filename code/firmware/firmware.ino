@@ -18,10 +18,10 @@ Please update wifi network information and sensor id accordingly.
 
 #define MAX_DISTANCE 100 //centimeters
 
-void connect_to_wifi(String ssid, String password, int debug);
-String detect_passage();
-//void enqueue_occurrence(QueueList <String> queue, int debug);
-//String post_payload(QueueList <String> queue, int debug);
+int connect_to_wifi(String ssid, String password, int tries, int debug);
+String detect_passage(int debug);
+void enqueue_occurrence(int debug);
+String post_payload(int debug);
 
 // we will use this to manage detections that haven't been sent away yet
 QueueList <String> queue;
@@ -42,8 +42,6 @@ int debug = 1;
 // we use this for making http requests easier
 HTTPClient http;
 
-
-
 void setup()
 {
   if(debug)
@@ -51,28 +49,60 @@ void setup()
     Serial.begin(115200);
     queue.setPrinter (Serial);
   }
-  connect_to_wifi("casa", "meiaportuguesameiamucarela", debug);
-}
-void loop()
-{
-  detect_passage(1);
+  connect_to_wifi(ssid, password, 10, 1);
 }
 
-void connect_to_wifi(String ssid, String password, int debug)
+void loop()
+{
+  // we need to continously scan for people entering or leaving
+  enqueue_occurrence(debug);
+
+  // we need to have wifi online in order do register the occurrences
+  int status = WiFi.status();
+  if(status != WL_CONNECTED)
+  {
+    if(debug) Serial.println("WiFi offline! Trying to reconnect!");
+    // we can't stop scanning for people. try reconnecting but not too hard
+    status = connect_to_wifi(ssid, password, debug, 1);
+  }
+  else
+  {
+    Serial.println(post_payload(debug));
+    if(debug)
+    {
+      Serial.println();
+      Serial.print("Queue now has "); Serial.print(queue.count()); Serial.println(" payloads");
+    }
+  }
+}
+
+int connect_to_wifi(String ssid, String password, int tries, int debug)
 {
   if(debug) Serial.println();
   WiFi.begin(ssid.c_str(), password.c_str());
   if(debug) Serial.print("Connecting to " + ssid);
-  while (WiFi.status() != WL_CONNECTED)
+  int counter = 0;
+  while (WiFi.status() != WL_CONNECTED && counter < tries)
   {
     delay(500);
     if(debug) Serial.print(".");
+    counter++;
   }
-  if(debug)
+  int status = WiFi.status();
+  if(status == WL_CONNECTED)
   {
-    Serial.println();
-    Serial.print("Connected, IP address: ");
-    Serial.println(WiFi.localIP());
+    if(debug)
+    {
+      Serial.println();
+      Serial.print("Connected, IP address: ");
+      Serial.println(WiFi.localIP());
+    }
+    return status;
+  }
+  else
+  {
+    if(debug) Serial.println("Unable to connect to Wifi!");
+    return status;
   }
 }
 
@@ -144,71 +174,75 @@ String detect_passage(int debug)
   return direction;
 }
 
-//void enqueue_occurrence(QueueList <String> queue, int debug)
-//{
-//  String direction;
-//  String payload;
-//  direction = detect_passage();
-//  int date = 0;
-//  if(direction != "")
-//  {
-//    payload = "{\"sensor\": \"" + String(sensor_id) + "\", \"direction\": \"" + direction + "\", \"occurrence_date\": \"" + date + "\"" + "}";
-//    if(debug)
-//    {
-//      Serial.print("Pushing ");
-//      Serial.println(payload);
-//    }
-//    queue.push(payload);
-//  }
-//}
-//
-//String post_payload(QueueList <String> queue, int debug)
-//{
-//  String payload;
-//  int httpCode;
-//  String codeMessage;
-//  if(!queue.isEmpty())
-//  {
-//    // we need to add these headers otherwise the request won't be accepted by the server
-//    if(debug) Serial.println("[HTTP] begin...");
-//    http.begin("http://adeusdentinho.herokuapp.com/api/movements/?format=json");
-//    http.setAuthorization("eletricademo", "140897hr");
-//    http.setUserAgent("python-requests/2.2.1 CPython/3.4.3 Linux/4.4.0-43-Microsoft");
-//    http.addHeader("Accept", "*/*");
-//    http.addHeader("Accept-Encoding", "gzip, deflate, compress");
-//    http.addHeader("Content-Type", "application/json");
-//
-//    payload = queue.pop();
-//    if(debug)
-//    {
-//      Serial.println("POSTing occurrence from queue:");
-//      Serial.println(payload);
-//    }
-//
-//    httpCode = http.POST(payload);
-//    if(httpCode > 0)
-//    {
-//      codeMessage = http.getString();
-//      if(debug)
-//      {
-//        Serial.print("[HTTP] POST response code: ");
-//        Serial.println(httpCode);
-//        Serial.println(http.getString());
-//      }
-//    }
-//    else
-//    {
-//      codeMessage = http.errorToString(httpCode);
-//      if(debug)
-//      {
-//        Serial.print("[HTTP] POST failed with response code:");
-//        Serial.print(http.errorToString(httpCode));
-//      }
-//    }
-//    http.end();
-//  }
-//  else
-//  {
-//    if(debug) Serial.println("Queue empty! No request was made.");
-//  }
-//}
+void enqueue_occurrence(int debug)
+{
+  String direction;
+  String payload;
+  direction = detect_passage(debug);
+  String date = "2017-11-05T12:13:14";
+  if(direction != "")
+  {
+    payload = "{\"sensor\": \"" + String(sensor_id) + "\", \"direction\": \"" + direction + "\", \"occurrence_date\": \"" + date + "\"" + "}";
+    if(debug)
+    {
+      Serial.print("Pushing ");
+      Serial.println(payload);
+    }
+    queue.push(payload);
+  }
+}
+
+String post_payload(int debug)
+{
+  if(WiFi.status() != WL_CONNECTED) return "Wifi not connected!";
+  String payload;
+  int httpCode;
+  String codeMessage;
+  if(!queue.isEmpty())
+  {
+    // we need to add these headers otherwise the request won't be accepted by the server
+    if(debug) Serial.println("[HTTP] begin...");
+    http.begin("http://adeusdentinho.herokuapp.com/api/movements/?format=json");
+    http.setAuthorization("eletricademo", "140897hr");
+    http.setUserAgent("python-requests/2.2.1 CPython/3.4.3 Linux/4.4.0-43-Microsoft");
+    http.addHeader("Accept", "*/*");
+    http.addHeader("Accept-Encoding", "gzip, deflate, compress");
+    http.addHeader("Content-Type", "application/json");
+
+    payload = queue.pop();
+    if(debug)
+    {
+      Serial.println("POSTing occurrence from queue:");
+      Serial.println(payload);
+    }
+
+    httpCode = http.POST(payload);
+    if(httpCode > 0)
+    {
+      codeMessage = http.getString();
+      if(debug)
+      {
+        Serial.print("[HTTP] POST response code: ");
+        Serial.println(httpCode);
+        Serial.println(http.getString());
+      }
+      return codeMessage;
+    }
+    else
+    {
+      codeMessage = http.errorToString(httpCode);
+      if(debug)
+      {
+        Serial.print("[HTTP] POST failed with response code:");
+        Serial.print(http.errorToString(httpCode));
+      }
+      return codeMessage;
+    }
+    http.end();
+  }
+  else
+  {
+    if(debug) Serial.println("Queue empty! No request was made.");
+    return "Queue empty!";
+  }
+}
