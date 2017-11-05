@@ -21,11 +21,19 @@ void setup()
   HTTPClient http;
   Serial.println("[HTTP] begin...");
   http.begin("http://adeusdentinho.herokuapp.com/api/movements/?format=json");
+  //http.begin("http://putsreq.com/en1tLq0W1bDQnTOte05d"); // add /inspect use this to inspect the requests
   http.setAuthorization("eletricademo", "140897hr");
-  String payload = "{\"sensor\":\"13\",\"direction\": \"IN\",\"occurrence_date\": \"2017-10-29T15:00:00\"}";
+  http.setUserAgent("python-requests/2.2.1 CPython/3.4.3 Linux/4.4.0-43-Microsoft");
+  http.addHeader("Accept", "*/*");
+  http.addHeader("Accept-Encoding", "gzip, deflate, compress");
+  http.addHeader("Content-Type", "application/json");
+
+
+  String payload = "{\"sensor\": \"13\", \"direction\": \"IN\", \"occurrence_date\": \"2017-11-04T10:11:12\"}";
   Serial.println(payload);
 
   int httpCode = http.POST(payload);
+  
   if(httpCode > 0)
   {
     Serial.print("[HTTP] POST response code: ");
