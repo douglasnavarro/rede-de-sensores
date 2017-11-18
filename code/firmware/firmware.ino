@@ -96,10 +96,15 @@ void setup()
 
   wifi_status = connect_to_wifi(ssid, password, 10, debug);
 
+<<<<<<< HEAD
   DateTime now         = rtc.now();
   timestamp            = now.secondstime();
   old_timestamp_hour   = timestamp;
   old_timestamp_minute = timestamp;
+=======
+  DateTime now     = rtc.now();
+  timestamp        = now.secondstime();
+>>>>>>> bab54ecfc019359fedc0ddaa9d7f6adfdf65347d
 
   //used for testing
   // old_timestamp_hour   = timestamp - 3540;
