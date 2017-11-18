@@ -8,10 +8,12 @@ Please update wifi network information and sensor id accordingly.
 #include <NewPing.h>
 #include <QueueList.h>
 #include <Arduino.h>
+#include <Wire.h>
+#include "RTClib.h"
 
-// NodeMCU Pin D1 > TRIGGER1 | Pin D2 > ECHO1
-#define TRIGGER1 5
-#define ECHO1    4
+// NodeMCU Pin D7 > TRIGGER1 | Pin D8 > ECHO1
+#define TRIGGER1 13
+#define ECHO1    15
 // NodeMCU Pin D5 > TRIGGER2 | Pin D6 > ECHO2
 #define TRIGGER2 14
 #define ECHO2    12
@@ -19,9 +21,11 @@ Please update wifi network information and sensor id accordingly.
 #define MAX_DISTANCE 100 //centimeters
 
 int connect_to_wifi(String ssid, String password, int tries, int debug);
-String detect_passage(int debug);
+int update_counter(int debug, int counter);
 void enqueue_occurrence(int debug);
-String post_payload(int debug);
+int post_payload(int debug, String payload);
+String stringfy_datetime(DateTime now);
+String assemble_payload(int debug, int counter, String date);
 
 // we will use this to manage detections that haven't been sent away yet
 QueueList <String> queue;
@@ -29,6 +33,9 @@ QueueList <String> queue;
 // we use the sonars to register people entering or leaving
 NewPing sonar1(TRIGGER1, ECHO1, MAX_DISTANCE);
 NewPing sonar2(TRIGGER2, ECHO2, MAX_DISTANCE);
+
+// we use the RTC to register when occurrences were registered and to decide when to post them
+RTC_DS1307 rtc;
 
 String ssid = "casa";
 String password = "meiaportuguesameiamucarela";
@@ -38,6 +45,19 @@ int sensor_id = 13;
 
 // leave this =1 to see messages through the serial port
 int debug = 1;
+
+// we assemble a payload every hour and post them every 15 minutes
+int timestamp, old_timestamp_hour, old_timestamp_minute;
+
+// set these to change balance frequency and queue decongestion
+int balance_period = 3600; //every hour
+int decongestion_period = 15*60 // 15 minutes
+
+// variables used in the main execution loop
+int counter;
+int httpCode;
+int wifi_status;
+String payload;
 
 // we use this for making http requests easier
 HTTPClient http;
@@ -49,30 +69,98 @@ void setup()
     Serial.begin(115200);
     queue.setPrinter (Serial);
   }
-  connect_to_wifi(ssid, password, 10, 1);
+
+  //we can't have the system working without a clock
+  if (!rtc.begin())
+  {
+    if(debug) Serial.println("Couldn't find RTC");
+    while (1);
+  }
+
+  if (!rtc.isrunning())
+  {
+    if(debug) Serial.println("RTC is NOT running!");
+    // following line sets the RTC to the date & time this sketch was compiled
+    DateTime compilation = DateTime(F(__DATE__), F(__TIME__));
+    rtc.adjust(compilation);
+    if(debug)
+    {
+      Serial.print("RTC time was adjusted to ");
+      Serial.print(compilation.year()); Serial.print("-");Serial.print(compilation.month());Serial.print("-");Serial.print(compilation.day());
+      Serial.print(" ");Serial.print(compilation.hour());Serial.print(":");Serial.print(compilation.minute());
+      // This line sets the RTC with an explicit date & time, for example to set
+      // January 21, 2014 at 3am you would call:
+      // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
+    }
+  }
+
+  wifi_status = connect_to_wifi(ssid, password, 10, debug);
+
+  DateTime now     = rtc.now();
+  timestamp        = now.secondstime();
+
+  //used for testing
+  // old_timestamp_hour   = timestamp - 3540;
+  // old_timestamp_minute = timestamp;
+  counter = 0;
 }
+
 
 void loop()
 {
   // we need to continously scan for people entering or leaving
-  enqueue_occurrence(debug);
+  counter = update_counter(debug, counter);
 
-  // we need to have wifi online in order do register the occurrences
-  int status = WiFi.status();
-  if(status != WL_CONNECTED)
+  DateTime now = rtc.now();
+  timestamp    = now.secondstime();
+  String date  = stringfy_datetime(now);
+
+  if(timestamp > old_timestamp_hour + balance_period) //we must assemble payload and decide if we post to server or push to queue
   {
-    if(debug) Serial.println("WiFi offline! Trying to reconnect!");
-    // we can't stop scanning for people. try reconnecting but not too hard
-    status = connect_to_wifi(ssid, password, debug, 1);
-  }
-  else
-  {
-    Serial.println(post_payload(debug));
-    if(debug)
+    old_timestamp_hour = timestamp;
+    payload       = assemble_payload(debug, counter, date);
+    wifi_status   = WiFi.status();
+
+    if(wifi_status == WL_CONNECTED)
     {
-      Serial.println();
-      Serial.print("Queue now has "); Serial.print(queue.count()); Serial.println(" payloads");
+      int httpCode = post_payload(debug, payload);
+      if (httpCode < 0) queue.push(payload);
     }
+    else
+    {
+      if(debug) Serial.println("WiFi was offline! Pushing payload to queue!");
+      queue.push(payload);
+    }
+  }
+
+  else if(timestamp > old_timestamp_minute + decongestion_period) //we must try to post a payload off the queue
+  {
+    old_timestamp_minute = timestamp;
+    wifi_status = WiFi.status();
+    if(!queue.isEmpty() && wifi_status == WL_CONNECTED)
+    {
+      payload  = queue.pop();
+      httpCode = post_payload(debug, payload);
+      if(httpCode < 0)
+      {
+        queue.push(payload);
+      }
+      else if(wifi_status != WL_CONNECTED)
+      {
+        wifi_status = connect_to_wifi(ssid, password, 3, debug);
+      }
+    }
+  }
+  if(debug)
+  {
+    Serial.println();
+    Serial.println("--------");
+    Serial.println(date);
+    Serial.print("timestamp = "); Serial.println(timestamp);
+    Serial.print("next hour = "); Serial.print(old_timestamp_hour+3600); Serial.print(" next minute = "); Serial.println(old_timestamp_minute + 180);
+    Serial.println();
+    Serial.print("Counter = ");Serial.println(counter);
+    Serial.print("Queue now has "); Serial.print(queue.count()); Serial.println(" payloads");
   }
 }
 
@@ -106,9 +194,8 @@ int connect_to_wifi(String ssid, String password, int tries, int debug)
   }
 }
 
-String detect_passage(int debug)
+int update_counter(int debug, int counter)
 {
-  String direction = "";
   delay(150); // avoid echo1 caused by trigger2
   unsigned int distance1 = sonar1.ping_cm();
   delay(150); //avoid echo2 caused by trigger1
@@ -135,9 +222,9 @@ String detect_passage(int debug)
           Serial.println("Waiting for person to leave sensor 2...");
         }
         delay(500);
-        direction = "IN";
+        counter = counter + 1;
         if(debug) Serial.println("---");
-        return direction;
+        return counter;
       }
       delay(100);
     }
@@ -164,85 +251,79 @@ String detect_passage(int debug)
           Serial.println("Waiting for person to leave sensor 1...");
         }
         delay(500);
-        direction = "OUT";
+        counter = counter - 1;
         if(debug) Serial.println("---");
-        return direction;
+        return counter;
       }
       delay(100);
     }
   }
-  return direction;
+  return counter;
 }
 
-void enqueue_occurrence(int debug)
+String assemble_payload(int debug, int counter, String date)
 {
-  String direction;
-  String payload;
-  direction = detect_passage(debug);
-  String date = "2017-11-05T12:13:14";
-  if(direction != "")
-  {
-    payload = "{\"sensor\": \"" + String(sensor_id) + "\", \"direction\": \"" + direction + "\", \"occurrence_date\": \"" + date + "\"" + "}";
-    if(debug)
-    {
-      Serial.print("Pushing ");
-      Serial.println(payload);
-    }
-    queue.push(payload);
-  }
+  String direction, value;
+  counter < 0 ? value = String((counter*-1)) : value = String(counter);
+  if(counter > 0) direction = "IN";
+  else direction = "OUT";
+  String payload = "{\"sensor\": \"" + String(sensor_id) + "\", \"direction\": \"" + direction + "\", \"occurrence_date\": \"" + date + "\"" + ", \"value\": \"" + value + "\"" + "}";
+  return payload;
 }
 
-String post_payload(int debug)
+int post_payload(int debug, String payload)
 {
-  if(WiFi.status() != WL_CONNECTED) return "Wifi not connected!";
-  String payload;
   int httpCode;
   String codeMessage;
-  if(!queue.isEmpty())
+  if(debug) Serial.println("[HTTP] begin...");
+  http.begin("http://oolho.herokuapp.com/api/movements/?format=json");
+  http.setAuthorization("eletricademo", "140897hr");
+  http.setUserAgent("python-requests/2.2.1 CPython/3.4.3 Linux/4.4.0-43-Microsoft");
+  http.addHeader("Accept", "*/*");
+  http.addHeader("Accept-Encoding", "gzip, deflate, compress");
+  http.addHeader("Content-Type", "application/json");
+  if(debug)
   {
-    // we need to add these headers otherwise the request won't be accepted by the server
-    if(debug) Serial.println("[HTTP] begin...");
-    http.begin("http://oolho.herokuapp.com/api/movements/?format=json");
-    http.setAuthorization("eletricademo", "140897hr");
-    http.setUserAgent("python-requests/2.2.1 CPython/3.4.3 Linux/4.4.0-43-Microsoft");
-    http.addHeader("Accept", "*/*");
-    http.addHeader("Accept-Encoding", "gzip, deflate, compress");
-    http.addHeader("Content-Type", "application/json");
+    Serial.println("POSTing occurrence:");
+    Serial.println(payload);
+  }
 
-    payload = queue.pop();
+  httpCode = http.POST(payload);
+
+  if(httpCode > 0)
+  {
+    codeMessage = http.getString();
     if(debug)
     {
-      Serial.println("POSTing occurrence from queue:");
-      Serial.println(payload);
-    }
-
-    httpCode = http.POST(payload);
-    if(httpCode > 0)
-    {
-      codeMessage = http.getString();
-      if(debug)
-      {
-        Serial.print("[HTTP] POST response code: ");
-        Serial.println(httpCode);
-        Serial.println(http.getString());
-      }
-      return codeMessage;
-    }
-    else
-    {
-      codeMessage = http.errorToString(httpCode);
-      if(debug)
-      {
-        Serial.print("[HTTP] POST failed with response code:");
-        Serial.print(http.errorToString(httpCode));
-      }
-      return codeMessage;
+      Serial.print("[HTTP] POST response code: ");
+      Serial.println(httpCode);
+      Serial.println(codeMessage);
     }
     http.end();
+    return httpCode;
   }
   else
   {
-    if(debug) Serial.println("Queue empty! No request was made.");
-    return "Queue empty!";
+    codeMessage = http.errorToString(httpCode);
+    if(debug)
+    {
+      Serial.print("[HTTP] POST failed with response code:");
+      Serial.print(codeMessage);
+    }
+    http.end();
+    return httpCode;
   }
+}
+
+String stringfy_datetime(DateTime now)
+{
+  String year, month, day, hour, minute, second;
+  (now.year() < 10)   ? year = "0" + String(now.year()) : year = String(now.year());
+  (now.month() < 10)  ? month = "0" + String(now.month()) : month = String(now.month());
+  (now.day() < 10)    ? day = "0" + String(now.day()) : day = String(now.day());
+  (now.hour() < 10)   ? hour = "0" + String(now.hour()) : hour = String(now.hour());
+  (now.minute() < 10) ? minute = "0" + String(now.minute()) : minute = String(now.minute());
+  (now.second() < 10) ? second = "0" + String(now.second()) : second = String(now.second());
+  String date = year + "-" + month + "-" + day + "T" + hour + ":" + minute + ":" + second;
+  return date;
 }
