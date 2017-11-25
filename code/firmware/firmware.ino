@@ -18,7 +18,7 @@ Please update wifi network information and sensor id accordingly.
 #define TRIGGER2 14
 #define ECHO2    12
 
-#define MAX_DISTANCE 100 //centimeters
+#define MAX_DISTANCE 50 //centimeters
 
 int connect_to_wifi(String ssid, String password, int tries, int debug);
 int update_counter(int debug, int counter);
@@ -51,7 +51,7 @@ int timestamp, old_timestamp_hour, old_timestamp_minute;
 
 // set these to change balance frequency and queue decongestion
 int balance_period = 3600; //every hour
-int decongestion_period = 15*60 // 15 minutes
+int decongestion_period = 15*60; // 15 minutes
 
 // variables used in the main execution loop
 int counter;
@@ -198,9 +198,9 @@ int connect_to_wifi(String ssid, String password, int tries, int debug)
 
 int update_counter(int debug, int counter)
 {
-  delay(150); // avoid echo1 caused by trigger2
+  delay(30); // avoid echo1 caused by trigger2
   unsigned int distance1 = sonar1.ping_cm();
-  delay(150); //avoid echo2 caused by trigger1
+  delay(30); //avoid echo2 caused by trigger1
   unsigned int distance2 = sonar2.ping_cm();
   if(distance1 > 0)
   {
@@ -211,7 +211,7 @@ int update_counter(int debug, int counter)
       Serial.print("("); Serial.print(distance1); Serial.print(")");
       Serial.print("Waiting for sensor 2");
     }
-    for(int i = 0; i < 10; i++)
+    for(int i = 0; i < 40; i++)
     {
       Serial.print(".");
       distance2 = sonar2.ping_cm();
@@ -223,12 +223,12 @@ int update_counter(int debug, int counter)
           Serial.println("Entry detected!");
           Serial.println("Waiting for person to leave sensor 2...");
         }
-        delay(500);
+        delay(1000);
         counter = counter + 1;
         if(debug) Serial.println("---");
         return counter;
       }
-      delay(100);
+      delay(30);
     }
   }
   if(distance2 > 0)
@@ -240,7 +240,7 @@ int update_counter(int debug, int counter)
         Serial.print("("); Serial.print(distance2); Serial.print(")");
         Serial.print("Waiting for sensor 1");
       }
-    for(int i = 0; i < 10; i++)
+    for(int i = 0; i < 40; i++)
     {
       Serial.print(".");
       distance1 = sonar1.ping_cm();
@@ -252,12 +252,12 @@ int update_counter(int debug, int counter)
           Serial.println("Exit detected!");
           Serial.println("Waiting for person to leave sensor 1...");
         }
-        delay(500);
+        delay(1000);
         counter = counter - 1;
         if(debug) Serial.println("---");
         return counter;
       }
-      delay(100);
+      delay(30);
     }
   }
   return counter;
