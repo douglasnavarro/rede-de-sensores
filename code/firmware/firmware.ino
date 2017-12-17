@@ -15,17 +15,18 @@ Please update wifi network information and sensor id accordingly.
 #define TRIGGER1 13
 #define ECHO1    15
 // NodeMCU Pin D5 > TRIGGER2 | Pin D6 > ECHO2
-#define TRIGGER2 14
-#define ECHO2    12
+#define TRIGGER2 10
+#define ECHO2    9
 
 #define MAX_DISTANCE 50 //centimeters
 
 int connect_to_wifi(String ssid, String password, int tries, int debug);
-int update_counter(int debug, int counter);
+int update_counter(int debug, int counter, int rate);
 void enqueue_occurrence(int debug);
 int post_payload(int debug, String payload);
 String stringfy_datetime(DateTime now);
 String assemble_payload(int debug, int counter, String date);
+void blink_led(int times);
 
 // we will use this to manage detections that haven't been sent away yet
 QueueList <String> queue;
@@ -41,10 +42,10 @@ String ssid = "casa";
 String password = "meiaportuguesameiamucarela";
 
 // every sensor must have an id
-int sensor_id = 13;
+int sensor_id = 14;
 
 // leave this =1 to see messages through the serial port
-int debug = 1;
+int debug = 0;
 
 // we assemble a payload every hour and post them every 15 minutes
 int timestamp, old_timestamp_hour, old_timestamp_minute;
@@ -64,6 +65,10 @@ HTTPClient http;
 
 void setup()
 {
+  // we use the onboard led to signal detections
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, HIGH);
+  
   if(debug)
   {
     Serial.begin(115200);
@@ -77,22 +82,22 @@ void setup()
     while (1);
   }
 
-  if (!rtc.isrunning())
-  {
-    if(debug) Serial.println("RTC is NOT running!");
-    // following line sets the RTC to the date & time this sketch was compiled
-    DateTime compilation = DateTime(F(__DATE__), F(__TIME__));
-    rtc.adjust(compilation);
-    if(debug)
-    {
-      Serial.print("RTC time was adjusted to ");
-      Serial.print(compilation.year()); Serial.print("-");Serial.print(compilation.month());Serial.print("-");Serial.print(compilation.day());
-      Serial.print(" ");Serial.print(compilation.hour());Serial.print(":");Serial.print(compilation.minute());
-      // This line sets the RTC with an explicit date & time, for example to set
-      // January 21, 2014 at 3am you would call:
-      // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
-    }
-  }
+//  if (!rtc.isrunning())
+//  {
+//    if(debug) Serial.println("RTC is NOT running!");
+//    // following line sets the RTC to the date & time this sketch was compiled
+//    DateTime compilation = DateTime(F(__DATE__), F(__TIME__));
+//    rtc.adjust(compilation);
+//    if(debug)
+//    {
+//      Serial.print("RTC time was adjusted to ");
+//      Serial.print(compilation.year()); Serial.print("-");Serial.print(compilation.month());Serial.print("-");Serial.print(compilation.day());
+//      Serial.print(" ");Serial.print(compilation.hour());Serial.print(":");Serial.print(compilation.minute());
+//      // This line sets the RTC with an explicit date & time, for example to set
+//      // January 21, 2014 at 3am you would call:
+//      // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
+//    }
+//  }
 
   wifi_status = connect_to_wifi(ssid, password, 10, debug);
 
@@ -104,6 +109,9 @@ void setup()
   //used for testing
   // old_timestamp_hour   = timestamp - 3540;
   // old_timestamp_minute = timestamp;
+//  DateTime compilation = DateTime(F(__DATE__), F(__TIME__));
+//  rtc.adjust(compilation);
+  
   counter = 0;
 }
 
@@ -111,7 +119,7 @@ void setup()
 void loop()
 {
   // we need to continously scan for people entering or leaving
-  counter = update_counter(debug, counter);
+  counter = update_counter(debug, counter, 40);
 
   DateTime now = rtc.now();
   timestamp    = now.secondstime();
@@ -135,24 +143,24 @@ void loop()
     }
   }
 
-  else if(timestamp > old_timestamp_minute + decongestion_period) //we must try to post a payload off the queue
-  {
-    old_timestamp_minute = timestamp;
-    wifi_status = WiFi.status();
-    if(!queue.isEmpty() && wifi_status == WL_CONNECTED)
-    {
-      payload  = queue.pop();
-      httpCode = post_payload(debug, payload);
-      if(httpCode < 0)
-      {
-        queue.push(payload);
-      }
-      else if(wifi_status != WL_CONNECTED)
-      {
-        wifi_status = connect_to_wifi(ssid, password, 3, debug);
-      }
-    }
-  }
+//  else if(timestamp > old_timestamp_minute + decongestion_period) //we must try to post a payload off the queue
+//  {
+//    old_timestamp_minute = timestamp;
+//    wifi_status = WiFi.status();
+//    if(!queue.isEmpty() && wifi_status == WL_CONNECTED)
+//    {
+//      payload  = queue.pop();
+//      httpCode = post_payload(debug, payload);
+//      if(httpCode < 0)
+//      {
+//        queue.push(payload);
+//      }
+//      else if(wifi_status != WL_CONNECTED)
+//      {
+//        wifi_status = connect_to_wifi(ssid, password, 3, debug);
+//      }
+//    }
+//  }
   if(debug)
   {
     Serial.println();
@@ -196,11 +204,11 @@ int connect_to_wifi(String ssid, String password, int tries, int debug)
   }
 }
 
-int update_counter(int debug, int counter)
+int update_counter(int debug, int counter, int rate)
 {
-  delay(30); // avoid echo1 caused by trigger2
+  delay(rate); // avoid echo1 caused by trigger2
   unsigned int distance1 = sonar1.ping_cm();
-  delay(30); //avoid echo2 caused by trigger1
+  delay(rate); //avoid echo2 caused by trigger1
   unsigned int distance2 = sonar2.ping_cm();
   if(distance1 > 0)
   {
@@ -223,12 +231,13 @@ int update_counter(int debug, int counter)
           Serial.println("Entry detected!");
           Serial.println("Waiting for person to leave sensor 2...");
         }
+        blink_led(1);
         delay(1000);
         counter = counter + 1;
         if(debug) Serial.println("---");
         return counter;
       }
-      delay(30);
+      delay(rate);
     }
   }
   if(distance2 > 0)
@@ -252,12 +261,13 @@ int update_counter(int debug, int counter)
           Serial.println("Exit detected!");
           Serial.println("Waiting for person to leave sensor 1...");
         }
+        blink_led(4);
         delay(1000);
         counter = counter - 1;
         if(debug) Serial.println("---");
         return counter;
       }
-      delay(30);
+      delay(rate);
     }
   }
   return counter;
@@ -329,3 +339,16 @@ String stringfy_datetime(DateTime now)
   String date = year + "-" + month + "-" + day + "T" + hour + ":" + minute + ":" + second;
   return date;
 }
+
+void blink_led(int times)
+{
+  int i;
+  for(i=0; i < times; i++)
+  {
+    digitalWrite(LED_BUILTIN, LOW);
+    delay(50);
+    digitalWrite(LED_BUILTIN, HIGH);
+    delay(50);
+  }
+}
+
